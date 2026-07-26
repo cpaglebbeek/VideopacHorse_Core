@@ -62,12 +62,18 @@ static void set_sprite(int n, uint8_t y, uint8_t x, uint8_t ctl,
         vdc8244_write(&V, (uint8_t)(0x80 + 8 * n + i), shape[i]);
 }
 
-/* char i op (x,y): charcode 0-63, kleur 0-7 (ptr = code*8, geen
- * Y-compensatie nodig omdat de tests op row-0-uitlijning werken) */
+/* char i op (x,y): charcode 0-63, kleur 0-7.
+ * BUG-001-gedragsfeit (MAME i8244.cpp draw_major): de charset-offset is
+ * ptr + (y>>1) + ((lijn-y)>>1) met 9-bit wrap — de ABSOLUTE Y telt mee.
+ * Software (o.a. de BIOS voor "SELECT GAME") compenseert zijn pointers
+ * daarvoor; deze helper doet hetzelfde: ptr = (code*8 - (y>>1)) & 0x1FF.
+ * Hoogte-afkap: hoogte = 7 - (((y>>1)+ptr)&7), 0 -> 8; met deze
+ * compensatie is ((y>>1)+ptr)&7 == 0, dus hoogte 7 = glyphrijen 0..6
+ * (rij 7 van elk eigen glyph is toch leeg). */
 static void set_char(int i, uint8_t y, uint8_t x, uint8_t code,
                      uint8_t color)
 {
-    uint16_t ptr9 = (uint16_t)(code * 8);
+    uint16_t ptr9 = (uint16_t)((code * 8 - (y >> 1)) & 0x1FF);
     vdc8244_write(&V, (uint8_t)(0x10 + 4 * i + 0), y);
     vdc8244_write(&V, (uint8_t)(0x10 + 4 * i + 1), x);
     vdc8244_write(&V, (uint8_t)(0x10 + 4 * i + 2), (uint8_t)(ptr9 & 0xFF));
@@ -183,30 +189,58 @@ static int test_V4_double_size_2px_steps(void)
 static int test_V5_quad_char_own_path(void)
 {
     vreset();
-    /* quad 0: '0','1','2','3'; positie komt uit de LAATSTE sub-char */
-    vdc8244_write(&V, 0x40, 200);              /* sub0 Y: mag niets doen */
-    vdc8244_write(&V, 0x41, 20);               /* sub0 X: mag niets doen */
-    vdc8244_write(&V, 0x42, 0 * 8);
-    vdc8244_write(&V, 0x43, 7 << 1);
-    vdc8244_write(&V, 0x46, 1 * 8);
-    vdc8244_write(&V, 0x47, 7 << 1);
-    vdc8244_write(&V, 0x4A, 2 * 8);
-    vdc8244_write(&V, 0x4B, 7 << 1);
-    vdc8244_write(&V, 0x4C, 80);               /* sub3 Y = quad-Y        */
-    vdc8244_write(&V, 0x4D, 30);               /* sub3 X = quad-X        */
-    vdc8244_write(&V, 0x4E, 3 * 8);
-    vdc8244_write(&V, 0x4F, 7 << 1);
+    /* BUG-001-gedragsfeit (MAME draw_major): X/Y van het kwartet komen
+     * uit de EERSTE sub-char (base+0/base+1); de hoogte van het HELE
+     * kwartet uit de pointer van de VIERDE sub-char; pitch 16 VDC-px.
+     * Quad '0','1','2','3' op (30,80): y>>1 = 40, dus gecompenseerde
+     * pointers ptr_j = (glyph_j*8 - 40) & 0x1FF (alle vier bit8=1). */
+    vdc8244_write(&V, 0x40, 80);               /* sub0 Y = quad-Y        */
+    vdc8244_write(&V, 0x41, 30);               /* sub0 X = quad-X        */
+    vdc8244_write(&V, 0x42, 0xD8);             /* (0*8-40)&0x1FF = 472   */
+    vdc8244_write(&V, 0x43, 0x01 | (7 << 1));
+    vdc8244_write(&V, 0x46, 0xE0);             /* (1*8-40)&0x1FF = 480   */
+    vdc8244_write(&V, 0x47, 0x01 | (7 << 1));
+    vdc8244_write(&V, 0x4A, 0xE8);             /* (2*8-40)&0x1FF = 488   */
+    vdc8244_write(&V, 0x4B, 0x01 | (7 << 1));
+    vdc8244_write(&V, 0x4C, 200);              /* sub3 Y: mag niets doen */
+    vdc8244_write(&V, 0x4D, 20);               /* sub3 X: mag niets doen */
+    vdc8244_write(&V, 0x4E, 0xF0);             /* (3*8-40)&0x1FF = 496   */
+    vdc8244_write(&V, 0x4F, 0x01 | (7 << 1));
     vdc8244_write(&V, 0xA0, 0x20);
     run_lines(0, 241);
     /* '0'-rij0 (0x70): kolommen 1-3 vanaf x=30 -> fb 62..67           */
     CHECK(px(62, 80) == C_WHITE);
     /* '1'-rij0 (0x20): kolom 2 vanaf x=30+16 -> fb (46+2)*2 = 96      */
     CHECK(px(96, 80) == C_WHITE);
+    /* '2'-rij0 (0x70): kolom 1 vanaf x=30+32 -> fb (62+1)*2 = 126     */
+    CHECK(px(126, 80) == C_WHITE);
+    /* '3'-rij0 (0x70) uit de sub3-pointer: fb (78+1)*2 = 158          */
+    CHECK(px(158, 80) == C_WHITE);
     /* spatie-gebied tussen sub-char 0 en 1 blijft leeg (pitch 16)     */
     CHECK(px(80, 80) == C_BLACK && px(88, 80) == C_BLACK);
-    /* positie uit sub-char 0 (20,200) is NIET gebruikt: zou '0' op
+    /* positie uit sub-char 3 (20,200) is NIET gebruikt: zou '3' op
      * fb-x 42..47 bij y=200 zetten                                    */
     CHECK(px(42, 200) == C_BLACK);
+    /* hoogte 7 uit sub3-ptr ((40+496)&7 == 0): rij 6 zichtbaar op
+     * lijn 92/93 ('0'-rij6 = 0x70, kolom 1), lijn 94 niet meer        */
+    CHECK(px(62, 92) == C_WHITE);
+    CHECK(px(62, 94) == C_BLACK);
+
+    /* hoogte van het HELE kwartet uit de VIERDE sub-char: zelfde quad,
+     * maar sub3-ptr = 494 -> (40+494)&7 = 6 -> hoogte 1 (alleen lijnen
+     * 80-81), ook al zou sub0's eigen pointer hoogte 7 geven. */
+    vreset();
+    vdc8244_write(&V, 0x40, 80);
+    vdc8244_write(&V, 0x41, 30);
+    vdc8244_write(&V, 0x42, 0xD8);             /* sub0: '0', gecompens.  */
+    vdc8244_write(&V, 0x43, 0x01 | (7 << 1));
+    vdc8244_write(&V, 0x4E, 0xEE);             /* sub3-ptr = 494         */
+    vdc8244_write(&V, 0x4F, 0x01 | (7 << 1));
+    vdc8244_write(&V, 0xA0, 0x20);
+    run_lines(0, 241);
+    CHECK(px(62, 80) == C_WHITE);      /* rij 0 van '0' nog getekend    */
+    /* zonder afkap zou lijn 82 '0'-rij1 (0x88, kolom 0) tonen         */
+    CHECK(px(60, 82) == C_BLACK);
     return 0;
 }
 
@@ -623,14 +657,16 @@ static int test_V7b_char_quad_no_edge_wrap(void)
     CHECK(px(120, 238) == C_WHITE && px(120, 239) == C_WHITE);
     for (x = 0; x < 16; x++)
         CHECK(px(120, x) == C_BLACK);
-    /* quad over de rechterrand: sub-chars 2/3 clippen weg, geen wrap */
+    /* quad over de rechterrand: sub-chars 2/3 clippen weg, geen wrap.
+     * Y=100 -> y>>1 = 50; blok-glyph 47 gecompenseerd:
+     * ptr = (47*8 - 50) & 0x1FF = 326 = 0x146 (b8=1, lage byte 0x46). */
     vreset();
     for (j = 0; j < 4; j++) {
-        vdc8244_write(&V, (uint8_t)(0x40 + 4 * j + 2), 0x78);  /* 47*8  */
+        vdc8244_write(&V, (uint8_t)(0x40 + 4 * j + 2), 0x46);
         vdc8244_write(&V, (uint8_t)(0x40 + 4 * j + 3), 0x0F);  /* b8+wit*/
     }
-    vdc8244_write(&V, 0x4C, 100);          /* quad-Y uit sub-char 3     */
-    vdc8244_write(&V, 0x4D, 140);          /* quad-X: subs op 140/156/  */
+    vdc8244_write(&V, 0x40, 100);          /* quad-Y uit sub-char 0     */
+    vdc8244_write(&V, 0x41, 140);          /* quad-X: subs op 140/156/  */
     vdc8244_write(&V, 0xA0, 0x20);         /* 172/188 (2 buiten beeld)  */
     run_lines(100, 100);
     CHECK(px(280, 100) == C_WHITE);        /* sub 0 zichtbaar           */
@@ -642,6 +678,10 @@ static int test_V7b_char_quad_no_edge_wrap(void)
 
 /* --------- V9 (vervolg): alle 64 glyphs uniek, spatie leeg ------------- */
 
+/* Signatuur van een glyph op (20,32) via gecompenseerde pointer
+ * (set_char). Hoogte is dan 7 (BUG-001-afkap) — rij 7 wordt niet
+ * getekend, maar die is in alle 64 eigen glyphs toch leeg, dus de
+ * uniciteitsmeting verliest er niets aan. */
 static uint64_t glyph_sig(uint8_t code)
 {
     uint64_t sig = 0;
@@ -677,37 +717,59 @@ static int test_V9b_charset_all64_distinct(void)
     return 0;
 }
 
-/* ------ char-pointer/Y-interactie: relatief model = v0.1-canon --------- */
+/* ------ char-pointer/Y-interactie: absolute-Y-model (BUG-001) ---------- */
 
 static int test_V_char_y_ptr_canon(void)
 {
     int b;
-    /* '1' (code 1) op oneven Y=33: rij = (lijn-Y)>>1 (relatief model,
-     * QUIRKS noot 4) — lijn 34 toont glyphrij 0 (0x20: alleen kolom 2) */
+    /* BUG-001-gedragsfeit (MAME draw_major): charset-offset =
+     * ptr + (y>>1) + ((lijn-y)>>1), 9-bit wrap. '1' (code 1) op oneven
+     * Y=33 via GEcompenseerde pointer (set_char: (8-16)&0x1FF = 504) —
+     * lijn 34 toont glyphrij 0 (0x20: alleen kolom 2). */
     vreset();
     set_char(0, 33, 40, 1, 7);
     vdc8244_write(&V, 0xA0, 0x20);
     run_lines(0, 241);
     CHECK(px((40 + 2) * 2, 34) == C_WHITE);
     CHECK(px((40 + 1) * 2, 34) == C_BLACK);
-    /* lijn 45: rij (45-33)>>1 = 6 (0x70: kolommen 1-3) */
+    /* lijn 45: rij (33>>1)+((45-33)>>1) = 22 -> charset[504+22] =
+     * charset[14] = '1'-rij6 (0x70: kolommen 1-3) */
     CHECK(px((40 + 1) * 2, 45) == C_WHITE);
     CHECK(px((40 + 3) * 2, 45) == C_WHITE);
     CHECK(px((40 + 4) * 2, 45) == C_BLACK);
-    /* 9-bit pointer-wrap: ptr 511, rij 1 wrapt naar charset-byte 0 */
+    /* ONgecompenseerd (rauwe ptr = 1*8) op dezelfde Y toont een ANDER
+     * glyph: charset[8 + 16] = charset[24] = '3'-rij0 (0x70) — de
+     * absolute Y telt dus mee in de charset-index. */
+    vreset();
+    vdc8244_write(&V, 0x10, 33);
+    vdc8244_write(&V, 0x11, 40);
+    vdc8244_write(&V, 0x12, 8);
+    vdc8244_write(&V, 0x13, (uint8_t)(7 << 1));
+    vdc8244_write(&V, 0xA0, 0x20);
+    run_lines(0, 241);
+    CHECK(px((40 + 1) * 2, 34) == C_WHITE);   /* kolom 1: wel '3',      */
+    CHECK(px((40 + 3) * 2, 34) == C_WHITE);   /* geen '1'               */
+    CHECK(px((40 + 0) * 2, 34) == C_BLACK);
+    /* 9-bit wrap + hoogte-8-pad: Y=60 (y>>1=30), ptr=481 ->
+     * ((30+481)&7) = 7 -> hoogte 0 -> 8 (lijnen 60..75); rij-index
+     * start op 511 en wrapt naar 0. */
     vreset();
     vdc8244_write(&V, 0x10, 60);
     vdc8244_write(&V, 0x11, 40);
-    vdc8244_write(&V, 0x12, 0xFF);
+    vdc8244_write(&V, 0x12, 0xE1);            /* 481 = 0x1E1            */
     vdc8244_write(&V, 0x13, (uint8_t)(0x01 | (7 << 1)));
     vdc8244_write(&V, 0xA0, 0x20);
-    run_lines(60, 63);
+    run_lines(60, 75);
     for (b = 0; b < 8; b++)                /* charset[511] = 0x00       */
         CHECK(px((40 + b) * 2, 60) == C_BLACK);
-    CHECK(px((40 + 1) * 2, 62) == C_WHITE);   /* charset[0] = 0x70      */
+    CHECK(px((40 + 1) * 2, 62) == C_WHITE);   /* wrap: charset[0]=0x70  */
     CHECK(px((40 + 3) * 2, 62) == C_WHITE);
     CHECK(px((40 + 0) * 2, 62) == C_BLACK);
     CHECK(px((40 + 4) * 2, 62) == C_BLACK);
+    /* hoogte 8: lijn 74 (rel. rij 7) toont charset[(481+37)&511] =
+     * charset[6] = '0'-rij6 (0x70) — zonder het 0->8-pad zou hier
+     * niets staan. */
+    CHECK(px((40 + 1) * 2, 74) == C_WHITE);
     return 0;
 }
 
@@ -823,6 +885,72 @@ static int test_V_beam_latch_a4_a5(void)
     return 0;
 }
 
+/* --------- V13: BIOS-stijl pointer-compensatie voor absolute Y ---------- */
+
+/* 7x8-signatuur van een char-glyph op (X,Y) uit het framebuffer
+ * (rijen 0..6; rij 7 valt onder de hoogte-7-afkap en is toch leeg). */
+static uint64_t char_sig_at(int x, int y)
+{
+    uint64_t sig = 0;
+    int r, b;
+    for (r = 0; r < 7; r++)
+        for (b = 0; b < 8; b++)
+            if (px((x + b) * 2, y + 2 * r) == C_WHITE)
+                sig |= 1ULL << (r * 8 + b);
+    return sig;
+}
+
+static int test_V13_char_ptr_y_bios_compensatie(void)
+{
+    /* BUG-001-gedragsfeit (MAME i8244.cpp draw_major): de charset-index
+     * bevat de ABSOLUTE Y (offset = ptr + (y>>1) + ((lijn-y)>>1), 9-bit
+     * wrap). Software zoals de BIOS ("SELECT GAME") compenseert zijn
+     * pointers per Y-positie. Hetzelfde glyph 'A' (code 32) via
+     * gecompenseerde pointers op drie Y-posities — even (16), oneven
+     * (33) en groot (120, verschuift ONgecompenseerd 7,5 glyph) —
+     * moet pixel-identieke glyphrijen opleveren. */
+    uint64_t sig16, sig33, sig120, sig_raw;
+    vreset();
+    set_char(0, 16, 20, 32, 7);        /* ptr = (256-8)&0x1FF  = 248    */
+    set_char(1, 33, 60, 32, 7);        /* ptr = (256-16)&0x1FF = 240    */
+    set_char(2, 120, 100, 32, 7);      /* ptr = (256-60)&0x1FF = 196    */
+    vdc8244_write(&V, 0xA0, 0x20);
+    run_lines(0, 241);
+    sig16 = char_sig_at(20, 16);
+    sig33 = char_sig_at(60, 33);
+    sig120 = char_sig_at(100, 120);
+    CHECK(sig16 != 0);                 /* 'A' tekent echt               */
+    CHECK(sig16 == sig33);             /* oneven Y: identiek            */
+    CHECK(sig16 == sig120);            /* grote Y: identiek             */
+    /* Zonder compensatie (rauwe ptr = 32*8 = 256) op Y=16 rendert een
+     * ANDER glyph: charset[256+8] = charset[264] = 'Z'-rij0. */
+    vreset();
+    vdc8244_write(&V, 0x10, 16);
+    vdc8244_write(&V, 0x11, 20);
+    vdc8244_write(&V, 0x12, 0x00);     /* 256 = 0x100                   */
+    vdc8244_write(&V, 0x13, (uint8_t)(0x01 | (7 << 1)));
+    vdc8244_write(&V, 0xA0, 0x20);
+    run_lines(0, 241);
+    sig_raw = char_sig_at(20, 16);
+    CHECK(sig_raw != 0);
+    CHECK(sig_raw != sig16);           /* absolute Y verschoof de index */
+    /* Expliciete hoogte-afkap: Y=60 (y>>1=30), ptr=350 ->
+     * ((30+350)&7) = 4 -> hoogte 3 (lijnen 60..65). Getekend worden
+     * blok-rijen charset[380..382] (0xF8); zonder afkap zou lijn 68
+     * charset[384] = 0x5C tonen (kolom 1 aan). */
+    vreset();
+    vdc8244_write(&V, 0x10, 60);
+    vdc8244_write(&V, 0x11, 40);
+    vdc8244_write(&V, 0x12, 0x5E);     /* 350 = 0x15E                   */
+    vdc8244_write(&V, 0x13, (uint8_t)(0x01 | (7 << 1)));
+    vdc8244_write(&V, 0xA0, 0x20);
+    run_lines(0, 241);
+    CHECK(px((40 + 0) * 2, 60) == C_WHITE);   /* rij 0 binnen de afkap  */
+    CHECK(px((40 + 0) * 2, 64) == C_WHITE);   /* rij 2 = laatste rij    */
+    CHECK(px((40 + 1) * 2, 68) == C_BLACK);   /* afgekapt: geen rij 4   */
+    return 0;
+}
+
 /* --------- palet: alle 24 kleuren vastgeklikt (regressie-anker) --------- */
 
 static int test_V_palette_all24(void)
@@ -910,6 +1038,8 @@ void register_vdc_tests(void)
                       test_V_char_y_ptr_canon);
     g7k_register_test("V12b_strobe_hbl_chrovl",
                       test_V12b_strobe_hbl_chrovl);
+    g7k_register_test("V13_char_ptr_y_bios_compensatie",
+                      test_V13_char_ptr_y_bios_compensatie);
     g7k_register_test("V_fill_mode_color_collision",
                       test_V_fill_mode_color_collision);
     g7k_register_test("V_hirq_active_lines",

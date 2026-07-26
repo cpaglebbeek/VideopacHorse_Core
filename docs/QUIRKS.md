@@ -39,7 +39,7 @@
 | V2 | VDC-writes GEBLOKKEERD zolang foreground enabled (echt ijzer) | Puzzle Piece Panic "emu-versie" = anti-testcase | [x] |
 | V3 | Collision-bitmatrix alle objectklassen (sprites/chars/grid/dots) | Killer Bees, Demon Attack, Cosmic Conflict | [x] |
 | V4 | Double-size sprites schuiven per 2 pixels | (O2EM 1.17.2/1.18/1.18.1) | [x] |
-| V5 | Quad-chars eigen tekenpad | KTAA, Black Hole/Red Baron-scores | [x] |
+| V5 | Quad-chars eigen tekenpad: X/Y van het kwartet uit de EERSTE sub-char, hoogte van het hele kwartet uit de pointer van de VIERDE sub-char, pitch 16 VDC-px | KTAA, Black Hole/Red Baron-scores | [x] |
 | V6 | Sprite/char-prioriteitsvolgorde | Demon Attack, Turtles, Atlantis | [x] |
 | V7 | Geen wrap van sprites/chars aan schermranden | Atlantis, P.T. Barnum's Acrobats | [x] |
 | V8 | Shifted/smooth sprite-modus (pseudo-hi-res) | Q*bert | [x] |
@@ -47,6 +47,7 @@
 | V10 | Dot-grid incl. rechterkolom; correcte gridlijn-hoogtes + onderste lijn | Marksman | [x] |
 | V11 | P17 laag = alle VDC-kleuren fel (achtergrond + donkere gridkleuren) | Killer Bees!-intro | [x] |
 | V12 | Leesgedrag unused/foreground/grid-registers zoals echt ijzer | (O2EM v1.18.1) | [x] |
+| V13 | Char-pointer/Y-compensatie: charset-offset bevat de ABSOLUTE Y (ptr + (y>>1) + ((lijn−y)>>1), 9-bit wrap) + hoogte-afkap 7−(((y>>1)+ptr)&7) (0→8); software compenseert pointers per Y | BIOS "SELECT GAME" (BUG-001) | [x] |
 
 ## Audio (in de 8244)
 
@@ -69,7 +70,7 @@
 
 Alle [x]-items zijn gedekt door groene tests in `make test` (ASan/UBSan):
 `tests/test_cpu.c` (C1-C9), `tests/test_cart.c` (M1-M4, M6, M7),
-`tests/test_vdc.c` (V1-V12, A1-A3, C7-VDC-kant, fill/HIRQ/beam-latch/palet),
+`tests/test_vdc.c` (V1-V13, A1-A3, C7-VDC-kant, fill/HIRQ/beam-latch/palet),
 `tests/test_state.c` (S3), `tests/test_sys.c` (M5, S1, S2, C7-bedrading
 end-to-end via `test_C7_t1_wiring_vbl_hbl`). Kanttekeningen:
 
@@ -85,7 +86,8 @@ end-to-end via `test_C7_t1_wiring_vbl_hbl`). Kanttekeningen:
    `G7K_ROMDIR` — geen ROMs in git (CLAUDE.md regel 3).
    **Echt gedraaid op 2026-07-26:** `G7K_ROMDIR=~/Downloads make`-run,
    lokale `vp_01pl.bin` CRC geverifieerd `EE3EE642`, resultaat
-   `[PASS] test_M7_real_rom_vp01pl` (84/84 groen, 0 skip). In CI zonder
+   `[PASS] test_M7_real_rom_vp01pl` (85/85 groen, 0 skip, herbevestigd
+   na de BUG-001-testronde met V13 erbij). In CI zonder
    ROM blijft de regel dus op synthetische vectoren + deze gedateerde
    hardware-run leunen.
 3. **Timer-prescaler-fase (CPU).** STRT T reset de /32-prescaler; de
@@ -95,8 +97,18 @@ end-to-end via `test_C7_t1_wiring_vbl_hbl`). Kanttekeningen:
 4. **VDC-interpretaties.** Expliciet gemarkeerde interpretaties in
    `vdc8244.c`, v0.1-canon, elk vastgeklikt in een test; herzien zodra
    echte-ijzer/BIOS-metingen beschikbaar zijn:
-   - char-pointer/Y-interactie relatief model (rij=(lijn-Y)>>1; [B] 4.4
-     noemt de echte interactie "very confusing") — `test_V_char_y_ptr_canon`;
+   - char-pointer/Y-interactie: ABSOLUTE-Y-model (BUG-001-fix 2026-07-26,
+     vervangt het eerdere relatieve model). Charset-offset =
+     ptr + (y>>1) + ((lijn−y)>>1) met 9-bit wrap; char-hoogte =
+     7 − (((y>>1)+ptr)&7), waarde 0 → 8; zichtbaar y ≤ lijn < y+2·hoogte.
+     De ABSOLUTE Y telt dus mee in de charset-index; software compenseert
+     zijn pointers per Y-positie (BIOS "SELECT GAME"). Quad-chars: X/Y uit
+     de EERSTE sub-char, hoogte van het kwartet uit de pointer van de
+     VIERDE sub-char. NTSC tekent chars/quads met y < 0x0E niet; PAL wel.
+     Bron: MAME i8244.cpp draw_major (gedragsfeit — geen code overgenomen;
+     [B] 4.4 noemt de interactie "very confusing") —
+     `test_V_char_y_ptr_canon` + `test_V13_char_ptr_y_bios_compensatie`
+     + `test_V5_quad_char_own_path`;
    - V12-leeswaarden (geblokte/ongebruikte registers lezen 0x00);
    - sprite-bit0=links; fill-kleur=gridkleur ([B] 4.2 aangehouden waar
      4.2/4.6 elkaar tegenspreken) en fill-collision-klasse=verticale grid

@@ -503,21 +503,28 @@ static void put_run_vdc(lctx *c, int x_vdc, int w_vdc, uint32_t col,
 }
 
 /* Gemeenschappelijk teken-pad voor single chars én quad-subchars.
- * Charset-adressering: 9-bit bytepointer (b3-bit0 = bit 8, [B] 4.4);
- * de rij-teller telt per 2 scanlijnen op bij de pointer (glyphrijen
- * worden verticaal verdubbeld), 9-bit wrap over de 512-byte charset. */
+ * Charset-adressering (BUG-001-fix, gedragsfeit MAME i8244.cpp draw_major):
+ *   offset = ptr9 + (y>>1) + ((line-y)>>1), 9-bit wrap.
+ * De ABSOLUTE Y-positie telt dus mee in de charset-index; software (o.a. de
+ * BIOS voor "SELECT GAME") compenseert zijn pointers hiervoor. Daarnaast kapt
+ * de hardware een char af op de 8-rij-glyphgrens:
+ *   height = 7 - (((y>>1) + ptr) & 7), 0 -> 8, zichtbaar y..y+2*height. */
+static int char_height(int y, uint16_t ptr9)
+{
+    int h = 7 - (int)((((uint16_t)(y >> 1)) + ptr9) & 7u);
+    return h ? h : 8;
+}
+
 static void draw_char_slice(lctx *c, int line, int x_vdc, int y,
-                            uint16_t ptr9, uint8_t colidx)
+                            uint16_t ptr9, uint8_t colidx, int height)
 {
     int row, b;
     uint8_t bits;
     uint32_t col;
 
-    if (line < y)
+    if (line < y || line >= y + 2 * height)
         return;
-    row = (line - y) >> 1;
-    if (row >= 8)
-        return;
+    row = (y >> 1) + ((line - y) >> 1);
     bits = k_charset[(uint16_t)(ptr9 + (uint16_t)row) & 0x1FF];
     col = k_pal_obj[colidx & 7];
     for (b = 0; b < 8; b++)
@@ -531,26 +538,36 @@ static void draw_chars(lctx *c, int line)
     for (i = 0; i < 12; i++) {
         const uint8_t *r = &c->v->regs[0x10 + 4 * i];
         uint16_t ptr9 = (uint16_t)(r[2] | ((uint16_t)(r[3] & 0x01) << 8));
-        draw_char_slice(c, line, r[1], r[0], ptr9, (uint8_t)(r[3] >> 1));
+        /* NTSC: objecten met y < 0x0E worden niet getekend (MAME-feit) */
+        if (c->v->region == G7K_REGION_NTSC && r[0] < 0x0E)
+            continue;
+        draw_char_slice(c, line, r[1], r[0], ptr9, (uint8_t)(r[3] >> 1),
+                        char_height(r[0], ptr9));
     }
 }
 
 static void draw_quads(lctx *c, int line)
 {
-    /* V5: quad-chars hebben een EIGEN tekenpad: 4 sub-chars naast
-     * elkaar; Y en X komen uit de LAATSTE sub-char en de pitch is
-     * 16 VDC-px ("one character wide space between each", [B] 4.5). */
+    /* V5: quad-chars hebben een EIGEN tekenpad: 4 sub-chars naast elkaar,
+     * pitch 16 VDC-px. BUG-001-fix (gedragsfeiten MAME draw_major):
+     * X/Y komen uit de EERSTE sub-char en de hoogte van het hele kwartet
+     * wordt bepaald door de pointer van de VIERDE sub-char. */
     int q, j;
     for (q = 0; q < 4; q++) {
         const uint8_t *base = &c->v->regs[0x40 + 16 * q];
-        uint8_t y = base[12];
-        uint8_t x = base[13];
+        uint8_t y = base[0];
+        uint8_t x = base[1];
+        uint16_t ptr3 =
+            (uint16_t)(base[14] | ((uint16_t)(base[15] & 0x01) << 8));
+        int height = char_height(y, ptr3);
+        if (c->v->region == G7K_REGION_NTSC && y < 0x0E)
+            continue;
         for (j = 0; j < 4; j++) {
             const uint8_t *r = &base[4 * j];
             uint16_t ptr9 =
                 (uint16_t)(r[2] | ((uint16_t)(r[3] & 0x01) << 8));
             draw_char_slice(c, line, (int)x + 16 * j, y, ptr9,
-                            (uint8_t)(r[3] >> 1));
+                            (uint8_t)(r[3] >> 1), height);
         }
     }
 }
