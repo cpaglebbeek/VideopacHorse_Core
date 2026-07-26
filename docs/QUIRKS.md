@@ -64,7 +64,7 @@
 | S1 | Warme reset (reset-toets) ≠ koude reset (power-cycle wist RAM/VDC) | [x] |
 | S2 | PAL 50Hz / NTSC 60Hz first-class runtime-parameter | [x] |
 | S3 | Savestate-header bevat BIOS-CRC + machinetype + regio | [x] |
-| S4 | Keyboard-matrix-scan zoals BIOS hem uitvoert | [ ] |
+| S4 | Keyboard-matrix-scan zoals BIOS hem uitvoert | [x] |
 
 ## Teststatus & beargumenteerd uitstel (integratie v0.1, 2026-07-26)
 
@@ -74,11 +74,12 @@ Alle [x]-items zijn gedekt door groene tests in `make test` (ASan/UBSan):
 `tests/test_state.c` (S3), `tests/test_sys.c` (M5, S1, S2, C7-bedrading
 end-to-end via `test_C7_t1_wiring_vbl_hbl`). Kanttekeningen:
 
-1. **S4 open (enige [ ]).** De teken→matrixcode-tabel (`g7k_key_from_char`)
-   levert nog `G7K_KEY_NONE` en de joystick/keyboard-bitvolgorde in `sys.c`
-   is een documentatie-aanname. Bewust uitgesteld: de tabel hoort afgeleid
-   én getest te worden tegen de echte BIOS-scanroutine (S4-bouwer), geen
-   goktabel in het contract (ARCHITECTURE.md appendix, open punt 11).
+1. **S4 gedicht (v0.1.2).** Teken→matrixcode-tabel uit gedragsfeit MAME
+   odyssey2.cpp KEY.0-KEY.5 (6 rijen × 8 kolommen; rij1 kolom 2/3 niet
+   aangesloten; CLR=0x08, ENT=0x0A). `S4_keyboard_matrix_scan` toetst de
+   tabel én end-to-end de 74148-encoderweg (GS→P24, ~kolom→P25-27) via een
+   BIOS-stijl scanprogramma. Live geverifieerd met echte BIOS in de
+   webversie (game-select).
 2. **M7 hardware-vectoren.** De M4/M2/M3-mapping is groen bewezen op
    synthetisch nagebouwde vectoren (eerste fetch 0x44 + per-bank
    CRC-streams). `test_M7_real_rom_vp01pl` verifieert dezelfde vectoren

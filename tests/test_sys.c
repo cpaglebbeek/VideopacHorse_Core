@@ -259,10 +259,71 @@ done:
     return rc;
 }
 
+
+/* S4: toetsenbord-matrix — teken->matrixcode-tabel (gedragsfeit MAME
+ * odyssey2.cpp KEY.0-KEY.5) plus end-to-end scan: een BIOS-stijl programma
+ * activeert de scan (P12 laag), selecteert rij 0 via P2 en leest het
+ * 74148-encoderantwoord terug (GS -> P24 laag, P25-27 = ~kolom). */
+static int test_S4_keyboard_matrix_scan(void)
+{
+    static const struct { char c; uint8_t code; } map[] = {
+        {'0',0},{'1',1},{'7',7},{'8',8},{'9',9},{' ',12},{'?',13},
+        {'L',14},{'P',15},{'+',16},{'O',23},{'Q',24},{'K',31},{'A',32},
+        {'.',39},{'-',40},{'*',41},{'/',42},{'=',43},{'Y',44},{'N',45},
+        {'\b',46},{'\n',47},{'\r',47},{'q',24},
+    };
+    for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); i++)
+        if (g7k_key_from_char(map[i].c) != map[i].code)
+            return 1;
+    /* niet-bestaande toetsen en de niet-aangesloten kolommen 2/3 van rij 1 */
+    if (g7k_key_from_char('@') != G7K_KEY_NONE) return 1;
+    if (g7k_key_from_char(',') != G7K_KEY_NONE) return 1;
+    if (g7k_key_from_char(':') != G7K_KEY_NONE) return 1;
+
+    static const uint8_t prog[] = {
+        0x23, 0xAB,       /* MOV A,#0xAB : P12 laag (scan aan), P13 hoog, */
+        0x39,             /* OUTL P1,A     P14+P16 laag (extram-write)    */
+        0x23, 0xF8,       /* MOV A,#0xF8 : rij 0, upper latch-bits hoog   */
+        0x3A,             /* OUTL P2,A                                    */
+        0x0A,             /* IN A,P2   -> latch & encoder-antwoord        */
+        0xB8, 0x20,       /* MOV R0,#0x20                                 */
+        0x90,             /* MOVX @R0,A                                   */
+    };
+    uint8_t bios[1024];
+    make_bios(bios, prog, sizeof(prog));
+
+    g7k_sys *sys = g7k_create();
+    if (!sys)
+        return 1;
+    int rc = 1;
+    if (g7k_load_bios(sys, bios, sizeof(bios)) != 0)
+        goto done;
+    g7k_reset(sys, true);
+
+    /* toets '1' (rij 0, kolom 1) ingedrukt: verwacht 0xF8 & (0x0F |
+     * ((~1&7)<<5)) = 0xF8 & 0xCF = 0xC8 (P24 laag = GS, P25-27 = ~kolom) */
+    g7k_key_set(sys, g7k_key_from_char('1'), true);
+    g7k_run_frame(sys);
+    if (g7k_extram_peek(sys, 0x20) != 0xC8)
+        goto done;
+
+    /* losgelaten: encoder zwijgt, IN A,P2 leest de eigen latch terug */
+    g7k_key_set(sys, g7k_key_from_char('1'), false);
+    g7k_reset(sys, false);
+    g7k_run_frame(sys);
+    if (g7k_extram_peek(sys, 0x20) != 0xF8)
+        goto done;
+    rc = 0;
+done:
+    g7k_destroy(sys);
+    return rc;
+}
+
 void register_sys_tests(void);
 
 void register_sys_tests(void)
 {
+    g7k_register_test("S4_keyboard_matrix_scan", test_S4_keyboard_matrix_scan);
     g7k_register_test("test_M5_extram_128_not_256",
                       test_M5_extram_128_not_256);
     g7k_register_test("test_S1_warm_keeps_extram_cold_wipes",

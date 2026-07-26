@@ -335,10 +335,28 @@ void g7k_key_set(g7k_sys *sys, uint8_t matrix_code, bool down)
 
 uint8_t g7k_key_from_char(char c)
 {
-    /* TODO(S4): tekens -> matrixcodes zoals de BIOS-scan ze ziet; de
-     * tabel wordt afgeleid + getest in de S4-keyboardtest (input-bouwer).
-     * Tot die tijd: geen mapping — bewust geen gok-tabel in het contract. */
-    (void)c;
+    /* S4: teken -> matrixcode (rij*8 + kolom) van het O2/G7000-membraan.
+     * Rij-indeling per scanrij (gedragsfeit MAME odyssey2.cpp KEY.0-KEY.5;
+     * rijen 6-7 bestaan maar zijn leeg):
+     *   0: 0 1 2 3 4 5 6 7
+     *   1: 8 9 . . SPC ? L P     (kolom 2-3 niet aangesloten)
+     *   2: + W E R T U I O
+     *   3: Q S D F G H J K
+     *   4: A Z X C V B M .
+     *   5: - * / = Y N CLR ENT   (CLR='\b' 0x08, ENT='\n'/'\r')
+     * Kolomantwoord loopt via de 74148-encoder in sys_read_p2. */
+    static const char rows[6][9] = {
+        "01234567", "89\0\0 ?LP", "+WERTUIO",
+        "QSDFGHJK", "AZXCVBM.", "-*/=YN\b\n",
+    };
+    if (c >= 'a' && c <= 'z')
+        c = (char)(c - 'a' + 'A');
+    if (c == '\r')
+        c = '\n';
+    for (int r = 0; r < 6; r++)
+        for (int k = 0; k < 8; k++)
+            if (rows[r][k] == c && c != '\0')
+                return (uint8_t)(r * 8 + k);
     return G7K_KEY_NONE;
 }
 
