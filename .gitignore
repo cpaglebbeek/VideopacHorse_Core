@@ -1,0 +1,14 @@
+# Build
+build/
+*.o
+*.a
+*.wasm
+
+# ROMs/BIOS — NOOIT committen (copyright / geen licentie)
+*.bin
+*.rom
+bios/
+roms/
+
+# OS
+.DS_Store
