@@ -64,3 +64,55 @@ framebuffer/audio en zet input voor het volgende frame.
 - **VideopacHorse_Web/_Android/_SteamDeck** — consumenten van `g7000.h`
 - **Meta_Master** — protocollen, PROJECTS.json, STATUS
 - **SteamDeckMSX** — herbruikt deploy-route `/Deploy2SteamDeck` voor de Deck-port
+
+---
+
+## Appendix — Interne interfaces v0.1 (architect, 2026-07-26)
+
+Contract: `src/core_internal.h` (volledige kloktopologie + bronnen staan daar in de kop).
+Tijdelijke linkbaarheid: `src/stubs_tmp.c` — per functie gemarkeerd `TIJDELIJK: vervangen
+door <bestand>`; elke bouwer verwijdert bij oplevering alléén zijn eigen blok, de
+integrator gooit het bestand weg zodra alle vier de echte implementaties er zijn.
+
+### Gemaakte keuzes
+
+1. **Kloktopologie (onderzocht + vastgelegd):** NTSC XTAL 7.15909 MHz, CPU-pinklok
+   ×3/4, machinecyclus = XTAL/20; PAL XTAL 17.734475 MHz, CPU-pinklok /3,
+   machinecyclus = XTAL/45 (PAL-CPU is ~10% sneller). VDC-klok XTAL/2 (NTSC) resp.
+   /5 (PAL), pixelklok = 2× VDC-klok, htotal 455/456 px. Frames: NTSC 263 lijnen,
+   PAL 313; actief beeld in beide regio's lijn 0..241, VBLANK vanaf 242. Bronnen:
+   MCS-48-datasheet (÷15) + MAME `odyssey2.cpp`/`i8244.cpp` (gedragsfeiten, geen code).
+2. **Scheduler exact rationaal:** CPU-cycles per scanline zijn exact 91/4 (NTSC)
+   en 76/3 (PAL). `g7k_run_frame` gebruikt een breuk-accumulator + overshoot-schuld
+   (2-cycle-instructies over de lijngrens) → nul drift over een frame; geverifieerd:
+   4 NTSC-frames = exact 23933 machinecycli.
+3. **Structs volledig in `core_internal.h`,** alle subsysteem-state embedded in
+   `g7k_sys` (één calloc in `g7k_create`, cart-ROM als vast 16K-array). Nodig omdat
+   `state.c` alle structs serialiseert. Regel: bouwers wijzigen alleen hun eigen
+   struct-blok; signaturen wijzigen = overleg + versie-impact.
+4. **CPU is klok-agnostisch:** kent alleen "cycles per instructie" (C6); sys bepaalt
+   het lijnbudget. Alle omgevingstoegang via `cpu8048_bus`-callbacks (ROM-fetch,
+   MOVX, P1/P2/BUS, T0/T1); `cpu8048_reset` pompt P1=P2=0xFF door de callbacks →
+   cart boot uit bank 3 (C8/M3) zonder speciale gevallen.
+5. **VDC-lockstep-paar** `begin_line`/`render_line`: status/T1 kloppen tijdens de
+   CPU-burst van een lijn, renderen (pixels+collision+audio-tick) gebeurt erna →
+   mid-line registerwrites zichtbaar (V1). T1 = VBL **of** HBL (C7, MAME-feit);
+   HBLANK-fase via `vdc8244_hblank_at(cycles_into_line)`.
+6. **Bus-decodering in sys.c** (gedragsfeiten MAME): VDC-read bij `(P1&0x48)==0`,
+   VDC-write bij P13 laag; ext-RAM bij P14 laag én A7 laag (128B, M5); open bus
+   0xFF, overlap AND-t. Keyboard: P12 laag activeert scan, rij = P2[0:2] (74156),
+   antwoord via 74148 op P2[7:4]; joysticks op BUS bij rijselect 0/1 —
+   bitvolgorde/spelertoewijzing definitief te verifiëren in de S4-test.
+7. **Reset-semantiek (S1):** warm = alleen 8048-RESET-pin (RAM/VDC blijven staan);
+   koud = ook iram/extram/VDC/fb/cycli gewist. De VDC heeft geen reset-lijn.
+8. **Audio:** VDC pusht 2 samples per scanline in een ringbuffer; samplerate =
+   2× lijnfrequentie → 31469 Hz (NTSC) / 31113 Hz (PAL). Ring wordt op framegrens
+   geleegd zodat `g7k_audio_read` exact "het laatste frame" levert.
+9. **Framebuffer v0.1:** 320×240 (160 VDC-pixels horizontaal verdubbeld; 240 van
+   242 actieve lijnen). Runtime-API, dus later vrij aanpasbaar.
+10. **Input-latching op framegrens** (pending→live) als fundament voor
+    deterministische record/replay (QUIRKS-ontwerpprincipe 4).
+11. **Open punten:** `g7k_key_from_char` levert nog `G7K_KEY_NONE` — de
+    teken→matrixcode-tabel hoort bij de S4-bouwer (geen goktabel in het contract);
+    T0 ongebruikt tot The Voice-fase; PAL-lijnfrequentie bewust de interne
+    8245-telling (15556.6 Hz, slave-mode-kanttekening in `core_internal.h`).

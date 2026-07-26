@@ -2,6 +2,8 @@
 # Doelen:
 #   make            -> libg7000.a (native, release)
 #   make test       -> bouwt + draait volledige testsuite (met sanitizers)
+#   make tool       -> build/g7k_run (headless verificatietool; echte ROMs
+#                      via --bios/--cart of env G7K_BIOS/G7K_CART)
 #   make wasm       -> build/wasm/g7000.{js,wasm} via emcc (voor VideopacHorse_Web)
 #   make clean
 
@@ -29,6 +31,12 @@ test: $(SRC) $(TSRC)
 	$(CC) $(TESTCFLAGS) $(SRC) $(TSRC) -o build/g7k_test
 	./build/g7k_test
 
+tool: build/g7k_run
+
+build/g7k_run: $(SRC) tools/g7k_run.c include/g7000.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) $(SRC) tools/g7k_run.c -o build/g7k_run
+
 wasm: $(SRC)
 	@mkdir -p build/wasm
 	emcc -std=c11 -O3 -Iinclude $(SRC) \
@@ -40,4 +48,4 @@ wasm: $(SRC)
 clean:
 	rm -rf build
 
-.PHONY: all test wasm clean
+.PHONY: all test tool wasm clean

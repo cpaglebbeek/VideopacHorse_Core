@@ -33,12 +33,22 @@ void g7k_register_test(const char *name, g7k_test_fn fn)
 
 /* Elke test-unit levert een registratiefunctie; hier aanroepen. */
 void register_smoke_tests(void);
+void register_cpu_tests(void);
+void register_vdc_tests(void);
+void register_cart_tests(void);
+void register_state_tests(void);
+void register_sys_tests(void);
 
 int main(void)
 {
     int pass = 0, fail = 0, skip = 0;
 
     register_smoke_tests();
+    register_cpu_tests();
+    register_vdc_tests();
+    register_cart_tests();
+    register_state_tests();
+    register_sys_tests();
 
     for (int i = 0; i < g_test_count; i++) {
         int r = g_tests[i].fn();
