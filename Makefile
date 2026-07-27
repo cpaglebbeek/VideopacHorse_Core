@@ -4,6 +4,8 @@
 #   make test       -> bouwt + draait volledige testsuite (met sanitizers)
 #   make tool       -> build/g7k_run (headless verificatietool; echte ROMs
 #                      via --bios/--cart of env G7K_BIOS/G7K_CART)
+#   make netcheck   -> build/g7k_netplay_check (netplay-gate: determinisme,
+#                      desync-detectie en savestate-herstel; zie web /videopac/2/)
 #   make wasm       -> build/wasm/g7000.{js,wasm} via emcc (voor VideopacHorse_Web)
 #   make clean
 
@@ -33,9 +35,15 @@ test: $(SRC) $(TSRC)
 
 tool: build/g7k_run
 
+netcheck: build/g7k_netplay_check
+
 build/g7k_run: $(SRC) tools/g7k_run.c include/g7000.h
 	@mkdir -p build
 	$(CC) $(CFLAGS) $(SRC) tools/g7k_run.c -o build/g7k_run
+
+build/g7k_netplay_check: $(SRC) tools/g7k_netplay_check.c include/g7000.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) $(SRC) tools/g7k_netplay_check.c -o build/g7k_netplay_check
 
 wasm: $(SRC)
 	@mkdir -p build/wasm
@@ -48,4 +56,4 @@ wasm: $(SRC)
 clean:
 	rm -rf build
 
-.PHONY: all test tool wasm clean
+.PHONY: all test tool netcheck wasm clean

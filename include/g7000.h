@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-#define G7K_VERSION_STRING "0.4.2-Magnavox"
+#define G7K_VERSION_STRING "0.5.0-Veiga"
 
 typedef struct g7k_sys g7k_sys;
 

@@ -1,18 +1,19 @@
 # CLAUDE.md — VideopacHorse_Core
 
 Portable C11 emulator-core voor de Philips Videopac G7000 (Magnavox Odyssey²).
-Onderdeel van het **Gaming-ecosysteem**, VideopacHorse-familie (5 repos, lock-step versies):
-`Meta_VideopacHorse` (regie) · `VideopacHorse_Core` (dit, de engine) · `_Web` · `_Android` · `_SteamDeck`.
+Onderdeel van het **Gaming-ecosysteem**, VideopacHorse-familie (6 repos, lock-step versies):
+`Meta_VideopacHorse` (regie) · `VideopacHorse_Core` (dit, de engine) · `_Web` · `_Android` · `_SteamDeck` · `_Joystick`.
 
 ## Kernregels
 
 1. **Publieke API = `include/g7000.h`** — frontends gebruiken uitsluitend deze header. Wijzigingen aan de API zijn ALTIJD "Oranje" (+0.1.0) of hoger en vereisen sync met alle drie de port-repos.
 2. **Geen platform-code in de core.** Geen I/O, geen threads, geen globals, malloc alleen in create/destroy. C11, `-Wall -Wextra -Werror`.
-3. **GEEN ROMs in git.** BIOS (`o2rom.bin` e.a.), game-dumps en de Manopac homebrew-tools zijn copyrighted/ongelicenseerd — alleen hashes als test-fixtures. `.gitignore` blokkeert `*.bin`/`*.rom`; NOOIT omzeilen.
-4. **Licentie-brandmuur:** AGPL-3.0, 100% from scratch. Géén code/tabellen uit O2EM (Clarified Artistic License), MAME of andere emulators kopiëren — alleen gedrag/feiten/datasheets (verantwoording: `docs/O2EM_DEEPDIVE.md`). De 8244-charset opbouwen uit chip-documentatie, herkomst documenteren.
-5. **Nul per-game hacks.** Zie `docs/QUIRKS.md` ontwerpprincipes. Een game die niet draait = timing/gedragsbug in de core, geen aanleiding voor een CRC-hack.
-6. **Elke quirk uit `docs/QUIRKS.md` heeft een expliciete test** in `tests/`. Nieuwe hardware-kennis → eerst QUIRKS.md-regel + test, dan implementatie.
-7. **Testen:** `make test` (met ASan/UBSan) moet groen zijn vóór elke commit die src/ raakt. Testsuite is BIOS-loos zelfvoorzienend (eigen minimale 8048-programma's als byte-arrays); tests met echte BIOS/ROMs skippen automatisch als de bestanden ontbreken (pad via env `G7K_BIOS`, `G7K_ROMDIR`).
+3. **Determinisme is een contract, geen bijvangst.** De netplay-variant op `/videopac/2/` laat twee machines dezelfde emulatie draaien; dat werkt alleen zolang `g7k_run_frame` bij gelijke invoer bit-identiek blijft. Dus: geen floats in het emulatiepad, geen tijd, geen randombron, geen ongeïnitialiseerd geheugen dat gedrag stuurt. Elke wijziging in `cpu8048.c`/`vdc8244.c`/`sys.c`/`state.c` langs `make netcheck` — die toetst determinisme, desync-detectie én savestate-herstel via dezelfde API-aanroepen als de frontend.
+4. **GEEN ROMs in git.** BIOS (`o2rom.bin` e.a.), game-dumps en de Manopac homebrew-tools zijn copyrighted/ongelicenseerd — alleen hashes als test-fixtures. `.gitignore` blokkeert `*.bin`/`*.rom`; NOOIT omzeilen.
+5. **Licentie-brandmuur:** AGPL-3.0, 100% from scratch. Géén code/tabellen uit O2EM (Clarified Artistic License), MAME of andere emulators kopiëren — alleen gedrag/feiten/datasheets (verantwoording: `docs/O2EM_DEEPDIVE.md`). De 8244-charset opbouwen uit chip-documentatie, herkomst documenteren.
+6. **Nul per-game hacks.** Zie `docs/QUIRKS.md` ontwerpprincipes. Een game die niet draait = timing/gedragsbug in de core, geen aanleiding voor een CRC-hack.
+7. **Elke quirk uit `docs/QUIRKS.md` heeft een expliciete test** in `tests/`. Nieuwe hardware-kennis → eerst QUIRKS.md-regel + test, dan implementatie.
+8. **Testen:** `make test` (met ASan/UBSan) moet groen zijn vóór elke commit die src/ raakt. Testsuite is BIOS-loos zelfvoorzienend (eigen minimale 8048-programma's als byte-arrays); tests met echte BIOS/ROMs skippen automatisch als de bestanden ontbreken (pad via env `G7K_BIOS`, `G7K_ROMDIR`).
 
 ## Versionering & codenamen
 
