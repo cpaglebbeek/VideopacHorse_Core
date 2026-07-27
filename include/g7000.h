@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-#define G7K_VERSION_STRING "0.5.2-Rocha"
+#define G7K_VERSION_STRING "0.6.0-Siera"
 
 typedef struct g7k_sys g7k_sys;
 
