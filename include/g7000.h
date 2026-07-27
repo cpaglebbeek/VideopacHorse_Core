@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-#define G7K_VERSION_STRING "0.3.0-Guttenbrunner"
+#define G7K_VERSION_STRING "0.3.1-Harrison"
 
 typedef struct g7k_sys g7k_sys;
 
