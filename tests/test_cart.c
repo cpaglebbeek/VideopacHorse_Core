@@ -329,10 +329,26 @@ static int test_M7_real_rom_vp01pl(void)
     size_t n = fread(rom, 1, sizeof(rom), f);
     int extra = fgetc(f);                        /* moet EOF zijn */
     fclose(f);
-    if (n != sizeof(rom) || extra != EOF)
-        return 1;
-    if (tcrc32(rom, sizeof(rom)) != 0xEE3EE642u)
-        return 1;
+
+    /* Onderscheid VERKEERD BESTAND van KAPOTTE EMULATOR. Deze test verwacht een
+     * specifieke dump (Videopac nr 1 "plus", 8 KB, CRC EE3EE642). Ligt er een
+     * ander bestand met dezelfde naam — bijvoorbeeld de 2 KB-variant van
+     * hetzelfde spel — dan is dat een fout van de tester, geen bug in de core.
+     * Hiervóór gaf dat gewoon FAIL en zocht je in de verkeerde hoek. Nu wordt het
+     * een SKIP mét uitleg op stderr. */
+    if (n != sizeof(rom) || extra != EOF) {
+        fprintf(stderr,
+            "  [M7] overgeslagen: %s is %zu bytes, verwacht %zu "
+            "(is dit de 'plus'-dump, 8 KB?)\n", fname, n, sizeof(rom));
+        return 2;
+    }
+    uint32_t got = tcrc32(rom, sizeof(rom));
+    if (got != 0xEE3EE642u) {
+        fprintf(stderr,
+            "  [M7] overgeslagen: %s heeft CRC %08X, verwacht EE3EE642 "
+            "(ander bestand, niet per se een emulatiefout)\n", fname, got);
+        return 2;
+    }
 
     static const uint32_t bank_crcs[4] = {
         0x004DEC9Cu, 0x576D1FE3u, 0x0EBC9913u, 0x13EB8DD9u
